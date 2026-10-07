@@ -1,109 +1,87 @@
-# Điều khiển LED bằng nút nhấn (OneButton)
+# Điều khiển LED bằng nút nhấn với OneButton (ESP32)
 
-Dự án nhúng điều khiển một LED bằng một nút nhấn duy nhất, sử dụng thư viện [OneButton](https://github.com/mathertel/OneButton) để phân biệt các kiểu nhấn (single click, double click) mà không cần tự viết logic chống rung (debounce) hay đo thời gian.
+Dự án điều khiển LED trên ESP32 bằng một nút nhấn, sử dụng thư viện [OneButton](https://github.com/mathertel/OneButton) để nhận diện các kiểu nhấn (single click, double click) mà không cần tự xử lý chống rung (debounce) và đếm thời gian.
 
 ## 1. Chức năng
 
-| Thao tác trên nút | Hành vi | Hàm xử lý |
-|---|---|---|
-| Single click (nhấn 1 lần) | Bật/tắt LED (đảo trạng thái hiện tại) | `btnPush()` → `led.flip()` |
-| Double click (nhấn đúp) | Chuyển sang chế độ nháy LED, chu kỳ 200 ms | `btnDoubleClick()` → `led.blink(200)` |
+| Thao tác trên nút | Hành vi của LED |
+|---|---|
+| Single click (nhấn 1 lần) | Đảo trạng thái LED (ON ↔ OFF) |
+| Double click (nhấn đúp) | Chuyển sang chế độ nháy LED, chu kỳ 200 ms |
 
-Trạng thái khởi động: LED tắt (`led.off()` trong `setup()`).
+Khi khởi động, LED ở trạng thái tắt.
 
-### Thay đổi so với phiên bản trước
-
-| | Phiên bản cũ | Phiên bản hiện tại |
-|---|---|---|
-| Kích hoạt nháy LED | Nhấn giữ lâu (long press, > 1 s) – `attachLongPressStart(btnHold)` | Nhấn đúp – `attachDoubleClick(btnDoubleClick)` |
-| ON/OFF | Single click | Single click (giữ nguyên) |
+> Phiên bản trước dùng nhấn giữ (long press) để nháy LED. Phiên bản hiện tại đã thay bằng double click, và không còn xử lý nhấn giữ.
 
 ## 2. Phần cứng
 
-> Giá trị chân cụ thể được định nghĩa trong `LED.h` hoặc build flags (`LED_PIN`, `BTN_PIN`, `LED_ACT`, `BTN_ACT`). Điền lại theo mạch thực tế của bạn.
+- Board: ESP32 DOIT DevKit V1 (`esp32doit-devkit-v1`)
+- 1 LED (kèm điện trở hạn dòng 220 Ω – 330 Ω nếu dùng LED rời)
+- 1 nút nhấn (mặc định dùng nút BOOT có sẵn trên board)
 
-| Tín hiệu | Macro | Mô tả |
-|---|---|---|
-| LED | `LED_PIN` | Chân GPIO điều khiển LED |
-| Mức tích cực LED | `LED_ACT` | `HIGH` hoặc `LOW` tùy cách đấu LED |
-| Nút nhấn | `BTN_PIN` | Chân GPIO đọc nút |
-| Mức tích cực nút | `BTN_ACT` | Mức logic khi nút được nhấn |
+### Pin mapping
 
-Lưu ý đấu nối:
+| Chức năng | GPIO | Macro | Mức tích cực |
+|---|---|---|---|
+| Nút nhấn | 0 | `BTN_PIN` | `LOW` (`BTN_ACT`) |
+| LED | 15 | `LED_PIN` | `HIGH` (`LED_ACT`) |
 
-- LED phải có điện trở hạn dòng nối tiếp (thường 220 Ω – 1 kΩ tùy Vf và dòng mong muốn).
-- Nút nhấn nối giữa `BTN_PIN` và GND (nếu `BTN_ACT = LOW`) kèm trở kéo lên (pull-up nội hoặc ngoài 10 kΩ). Khởi tạo `OneButton button(BTN_PIN, !BTN_ACT)` cho biết nút ở trạng thái nghỉ là mức `!BTN_ACT`.
-- Nếu dùng nút cơ khí trên PCB, đặt thêm tụ 100 nF song song nút để giảm nhiễu; đặt tụ decoupling 100 nF gần chân VCC của vi điều khiển.
+### Sơ đồ nối LED rời
 
-## 3. Cấu trúc mã nguồn
+```
+GPIO15 ──[ 220Ω ]──►|── GND
+                    LED
+```
+
+Nút nhấn: một chân nối GPIO0, chân còn lại nối GND (nút BOOT trên board đã nối sẵn như vậy).
+
+### Lưu ý phần cứng
+
+- **GPIO0 là chân strapping.** Giữ nút này ở mức thấp lúc reset/cấp nguồn sẽ đưa ESP32 vào chế độ download. Khi đang chạy bình thường thì không ảnh hưởng, nhưng đừng giữ nút khi bật nguồn.
+- **GPIO15 cũng là chân strapping** (điều khiển log boot qua UART). Dùng làm output LED vẫn chạy được, nhưng tránh gắn tải kéo mức cố định lên chân này lúc khởi động.
+- Nút tích cực mức thấp (`BTN_ACT = LOW`) nên cần trở kéo lên. GPIO0 trên board DevKit đã có trở kéo lên ngoài; OneButton cũng bật `INPUT_PULLUP` mặc định.
+
+## 3. Cấu trúc dự án
 
 ```
 .
-├── main.cpp      # Khởi tạo, vòng lặp chính, các hàm xử lý sự kiện nút
-├── LED.h         # Lớp LED (on/off/flip/blink/loop) và định nghĩa chân
-└── README.md
+├── LED.h 
+├── OneButton.h
+├── README.md
+├── c4.cpp
+└── form.ini
 ```
 
-### Luồng chương trình (`main.cpp`)
-
-1. Khai báo đối tượng `LED led(LED_PIN, LED_ACT)` và `OneButton button(BTN_PIN, !BTN_ACT)`.
-2. `setup()`: tắt LED, đăng ký callback `attachClick(btnPush)` và `attachDoubleClick(btnDoubleClick)`.
-3. `loop()`: gọi `led.loop()` (cập nhật trạng thái nháy không chặn) và `button.tick()` (quét nút). Không dùng `delay()`, toàn bộ chạy theo `millis()` bên trong thư viện, nên hai tác vụ chạy song song không chặn nhau.
-
-### Lớp `LED` (`LED.h`)
-
-Các phương thức được `main.cpp` sử dụng:
-
-| Phương thức | Chức năng |
-|---|---|
-| `off()` | Tắt LED |
-| `flip()` | Đảo trạng thái LED |
-| `blink(ms)` | Nháy LED với chu kỳ `ms` |
-| `loop()` | Phải gọi liên tục trong `loop()` để duy trì nháy |
-
-## 4. Cài đặt & nạp chương trình
-
-Giả định: dự án build bằng PlatformIO (có `main.cpp` thay vì `.ino`).
-
-`platformio.ini` tham khảo:
+# 4. Cấu hình build (`form.ini`)
 
 ```ini
-[env:esp32dev]
+[env]
 platform = espressif32
-board = esp32dev
 framework = arduino
+monitor_speed = 115200
+upload_speed = 921600
 lib_deps =
-    mathertel/OneButton
+	mathertel/OneButton @ ^2.6.1
+
+[env:esp32doit-devkit-v1]
+board = esp32doit-devkit-v1
 build_flags =
-    -DLED_PIN=2
-    -DLED_ACT=HIGH
-    -DBTN_PIN=0
-    -DBTN_ACT=LOW
+	'-D BTN_PIN=0U'
+	'-D BTN_ACT=LOW'
+	'-D LED_PIN=15U'
+	'-D LED_ACT=HIGH'
 ```
 
-Nếu dùng Arduino IDE: đổi `main.cpp` thành `main.ino`, cài thư viện OneButton qua Library Manager, đặt `LED.h` cùng thư mục sketch.
-
-## 5. Kiểm thử
-
-| # | Thao tác | Kết quả mong đợi |
+| Mục | Giá trị | Ý nghĩa |
 |---|---|---|
-| 1 | Cấp nguồn | LED tắt |
-| 2 | Single click | LED bật |
-| 3 | Single click lần nữa | LED tắt |
-| 4 | Double click | LED nháy chu kỳ 200 ms |
-| 5 | Single click khi đang nháy | LED dừng nháy và về trạng thái ON/OFF |
-| 6 | Nhấn giữ > 1 s | Không có tác dụng |
+| `platform` | `espressif32` | Nền tảng ESP32 |
+| `framework` | `arduino` | Dùng Arduino core |
+| `monitor_speed` | 115200 | Baudrate Serial Monitor |
+| `upload_speed` | 921600 | Tốc độ nạp firmware |
+| `lib_deps` | `mathertel/OneButton @ ^2.6.1` | Thư viện xử lý nút nhấn |
+| `BTN_PIN` / `BTN_ACT` | `0U` / `LOW` | Chân và mức tích cực của nút |
+| `LED_PIN` / `LED_ACT` | `15U` / `HIGH` | Chân và mức tích cực của LED |
 
-Mục 5 phụ thuộc vào cách `LED::flip()` được cài đặt trong `LED.h`. Nếu LED vẫn tiếp tục nháy, cần cho `flip()` hủy chế độ blink trước khi đảo trạng thái.
+Chân và mức tích cực được truyền qua `build_flags`, nên muốn đổi chân chỉ cần sửa `platformio.ini`, không phải sửa code.
 
-## 6. Lưu ý kỹ thuật
 
-- **Độ trễ single click:** vì đã đăng ký double click, OneButton phải đợi hết cửa sổ chờ (mặc định khoảng 400 ms) mới xác nhận là single click. Có thể chỉnh bằng `button.setClickMs(...)`; đặt quá thấp sẽ khó bấm đúp.
-- **Debounce:** do OneButton xử lý (`setDebounceMs(...)` nếu cần chỉnh).
-- **Không chặn:** không dùng `delay()`, có thể mở rộng thêm tác vụ khác trong `loop()` mà không ảnh hưởng độ nhạy nút.
-
-## 7. Hướng mở rộng
-
-- Thêm long press để đổi tốc độ nháy hoặc tắt hẳn LED.
-- Lưu trạng thái LED vào bộ nhớ không bay hơi (NVS/EEPROM) để khôi phục sau khi mất nguồn.
-- Điều khiển độ sáng bằng PWM.
